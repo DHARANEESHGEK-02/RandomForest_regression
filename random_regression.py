@@ -1,66 +1,77 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.preprocessing import LabelEncoder
+from sklearn import tree
 import plotly.express as px
-import plotly.graph_objects as go
 
-st.title("🏠 House Price Prediction with Random Forest Regression")
+st.set_page_config(layout="wide", page_icon="💰")
+st.title("💼 Salary Predictor")
 
-# File upload
-uploaded_file = st.file_uploader("Upload CSV file (columns: Size, SqFt, Bedrooms, Bathrooms, Age, Price)", type="csv")
+uploaded_file = st.file_uploader("📁 Upload salaries.csv", type="csv")
 
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
-    st.write("Dataset preview:")
-    st.dataframe(df.head())
+    st.success(f"✅ Loaded {df.shape[0]} rows")
     
-    # Features and target
-    feature_cols = ['Size', 'SqFt', 'Bedrooms', 'Bathrooms', 'Age']
-    X = df[feature_cols]
-    y = df['Price']
+    # DYNAMIC COLUMN DETECTION - NO HARDCODING
+    st.write("**Exact columns:**", df.columns.tolist())
     
-    # Split data
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    # Find salary column automatically (handles any name variation)
+    salary_col = next(col for col in df.columns if 'salary' in col.lower())
+    st.write(f"**Using salary column:** `{salary_col}`")
     
-    # Train model
-    model = RandomForestRegressor(n_estimators=100, random_state=42)
-    model.fit(X_train, y_train)
+    st.dataframe(df.head(10), use_container_width=True)
     
-    # Predictions
-    y_pred = model.predict(X_test)
-    mse = mean_squared_error(y_test, y_pred)
-    r2 = r2_score(y_test, y_pred)
+    # SAFE Charts - uses detected column name
+    col1, col2 = st.columns(2)
+    with col1:
+        fig = px.histogram(df, x="company", color=salary_col)
+        st.plotly_chart(fig, use_container_width=True)
     
-    st.subheader("Model Performance")
-    st.write(f"Mean Squared Error: {mse:.2f}")
-    st.write(f"R² Score: {r2:.4f}")
+    with col2:
+        job_stats = df.groupby("job")[salary_col].mean().reset_index()
+        fig = px.bar(job_stats, x="job", y=salary_col)
+        st.plotly_chart(fig, use_container_width=True)
     
-    # Feature importance
-    importance = pd.DataFrame({
-        'feature': feature_cols,
-        'importance': model.feature_importances_
-    }).sort_values('importance', ascending=False)
+    # Model - uses detected column
+    inputs = df.drop(salary_col, axis=1)
+    target = df[salary_col]
     
-    fig = px.bar(importance, x='importance', y='feature', orientation='h',
-                 title='Feature Importance')
-    st.plotly_chart(fig)
+    le_company = LabelEncoder()
+    le_job = LabelEncoder()
+    le_degree = LabelEncoder()
     
-    # Prediction interface
-    st.subheader("Predict New House Price")
-    col1, col2, col3, col4, col5 = st.columns(5)
-    size = col1.number_input("Size (sqft)", value=2000)
-    sq_ft = col2.number_input("SqFt", value=2000)
-    bedrooms = col3.number_input("Bedrooms", value=3)
-    bathrooms = col4.number_input("Bathrooms", value=2.0, step=0.5)
-    age = col5.number_input("Age (years)", value=10)
+    inputs["companyn"] = le_company.fit_transform(inputs["company"])
+    inputs["jobn"] = le_job.fit_transform(inputs["job"])
+    inputs["degreen"] = le_degree.fit_transform(inputs["degree"])
     
-    input_data = np.array([[size, sq_ft, bedrooms, bathrooms, age]])
-    prediction = model.predict(input_data)[0]
+    inputsn = inputs[["companyn", "jobn", "degreen"]]
     
-    st.success(f"Predicted Price: ${prediction:,.2f}")
+    model = tree.DecisionTreeClassifier()
+    model.fit(inputsn, target)
     
+    st.metric("🎯 Model Accuracy", f"{model.score(inputsn, target):.1%}")
+    
+    # Prediction
+    st.header("🔮 Predict Salary >100k")
+    col1, col2, col3 = st.columns(3)
+    company = col1.selectbox("🏢 Company", df["company"].unique())
+    job = col2.selectbox("💼 Job", df["job"].unique())
+    degree = col3.selectbox("🎓 Degree", df["degree"].unique())
+    
+    if st.button("🚀 Predict", type="primary"):
+        test = np.array([[le_company.transform([company])[0],
+                          le_job.transform([job])[0],
+                          le_degree.transform([degree])[0]]])
+        pred = model.predict(test)[0]
+        prob = model.predict_proba(test)[0][1]
+        
+        if pred == 1:
+            st.success(f"**💰 YES >$100k** (Conf: {prob:.0%})")
+        else:
+            st.error(f"**📉 NO ≤$100k** (Conf: {1-prob:.0%})")
+
 else:
-    st.info("👈 Please upload a CSV file to get started!")
+    st.info("👆 Upload file to see data & charts")
+    st.stop()
